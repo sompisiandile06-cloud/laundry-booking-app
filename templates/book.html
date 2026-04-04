@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResidenceLaundry — Book a Machine</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+    <!-- ======================================================= HEADER -->
+    <header class="site-header">
+        <div class="header-inner">
+            <div class="brand">
+                <span class="brand-icon">⬡</span>
+                <span class="brand-name">ResidenceLaundry</span>
+            </div>
+            <nav>
+                <a href="/" class="nav-link">Machines</a>
+                <a href="/book" class="nav-link nav-cta active">Book a Machine</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- ======================================================= HERO -->
+    <section class="hero hero-small">
+        <p class="hero-label">Reservations</p>
+        <h1 class="hero-title">Book a Machine</h1>
+        <p class="hero-sub">Fill in your details below. Your slot will be held automatically.</p>
+    </section>
+
+    <!-- ======================================================= BOOKING FORM -->
+    <main class="main-content form-page">
+
+        <div class="form-layout">
+
+            <!-- LEFT: The Form -->
+            <div class="form-card">
+                <h2 class="form-card-title">New Booking</h2>
+
+                <!-- Success message (hidden by default) -->
+                <div id="success-msg" class="feedback-msg success-msg hidden">
+                    <span class="feedback-icon">✓</span>
+                    <div>
+                        <strong>Booking confirmed!</strong>
+                        <p id="success-details"></p>
+                    </div>
+                </div>
+
+                <!-- Error message (hidden by default) -->
+                <div id="error-msg" class="feedback-msg error-msg hidden">
+                    <span class="feedback-icon">✕</span>
+                    <div>
+                        <strong>Booking failed</strong>
+                        <p id="error-details"></p>
+                    </div>
+                </div>
+
+                <!-- Booking form — note: no <form> tag needed; we handle submit via JS -->
+                <div class="booking-form">
+
+                    <div class="field-group">
+                        <label class="field-label" for="student-name">Full Name</label>
+                        <input
+                            type="text"
+                            id="student-name"
+                            class="field-input"
+                            placeholder="e.g. Thabo Nkosi"
+                            autocomplete="name"
+                        />
+                    </div>
+
+                    <div class="field-group">
+                        <label class="field-label" for="room-number">Room Number</label>
+                        <input
+                            type="text"
+                            id="room-number"
+                            class="field-input"
+                            placeholder="e.g. 204"
+                            autocomplete="off"
+                        />
+                    </div>
+
+                    <div class="field-group">
+                        <label class="field-label" for="machine-select">Machine</label>
+                        <select id="machine-select" class="field-input field-select">
+                            <option value="">— Loading machines… —</option>
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <label class="field-label" for="start-time">Start Time</label>
+                        <input
+                            type="datetime-local"
+                            id="start-time"
+                            class="field-input"
+                        />
+                        <span class="field-hint" id="duration-hint">
+                            Select a machine to see cycle duration.
+                        </span>
+                    </div>
+
+                    <button id="submit-btn" class="submit-btn" onclick="submitBooking()">
+                        <span id="btn-label">Confirm Booking</span>
+                        <span id="btn-spinner" class="btn-spinner hidden">⟳</span>
+                    </button>
+
+                </div>
+            </div>
+
+            <!-- RIGHT: Info Panel -->
+            <div class="info-panel">
+                <h3 class="info-title">How it works</h3>
+                <ol class="info-steps">
+                    <li>
+                        <span class="step-num">01</span>
+                        <div>
+                            <strong>Enter your details</strong>
+                            <p>Your name and room number identify your booking.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">02</span>
+                        <div>
+                            <strong>Pick a machine</strong>
+                            <p>Choose any washer (45 min) or dryer (60 min).</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">03</span>
+                        <div>
+                            <strong>Set your start time</strong>
+                            <p>The end time is calculated automatically.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">04</span>
+                        <div>
+                            <strong>Confirm</strong>
+                            <p>If the slot is free, it's yours. No double-bookings.</p>
+                        </div>
+                    </li>
+                </ol>
+
+                <div class="info-duration-box">
+                    <div class="duration-item">
+                        <span class="duration-icon">🫧</span>
+                        <span><strong>Washer</strong> — 45 minutes</span>
+                    </div>
+                    <div class="duration-item">
+                        <span class="duration-icon">💨</span>
+                        <span><strong>Dryer</strong> — 60 minutes</span>
+                    </div>
+                </div>
+
+                <a href="/" class="back-link">← View machine status</a>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- ======================================================= FOOTER -->
+    <footer class="site-footer">
+        <p>© 2025 ResidenceLaundry · Data refreshes every 30 seconds</p>
+    </footer>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
