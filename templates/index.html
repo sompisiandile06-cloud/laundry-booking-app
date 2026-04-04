@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ResidenceLaundry — Machine Status</title>
     <link rel="stylesheet" href="/static/style.css" />
-    <!-- Google Fonts: DM Serif Display + DM Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
 
-    <!-- ======================================================= HEADER -->
     <header class="site-header">
         <div class="header-inner">
             <div class="brand">
@@ -25,46 +23,39 @@
         </div>
     </header>
 
-    <!-- ======================================================= HERO -->
     <section class="hero">
         <p class="hero-label">Live Status</p>
         <h1 class="hero-title">Laundry Room</h1>
-        <p class="hero-sub">See which machines are free right now and grab a slot before someone else does.</p>
+        <p class="hero-sub">See which machines are free right now. Busy machines show their next available slot — click to book it instantly.</p>
     </section>
 
-    <!-- ======================================================= MACHINES -->
     <main class="main-content">
 
-        <!-- Filter tabs -->
         <div class="filter-bar">
             <button class="filter-btn active" data-filter="all">All Machines</button>
             <button class="filter-btn" data-filter="Washer">Washers</button>
             <button class="filter-btn" data-filter="Dryer">Dryers</button>
         </div>
 
-        <!-- Loading skeleton shown while data loads -->
         <div id="loading" class="loading-state">
             <div class="spinner"></div>
             <p>Fetching machine status…</p>
         </div>
 
-        <!-- Error banner (hidden by default) -->
         <div id="error-banner" class="error-banner hidden">
             <span>⚠</span> Could not load machine data. Is the server running?
         </div>
 
-        <!-- Machine grid — populated by JavaScript -->
         <div id="machines-grid" class="machines-grid hidden"></div>
 
-        <!-- Legend -->
         <div class="legend">
             <span class="legend-dot available-dot"></span> Available
-            <span class="legend-dot busy-dot"></span> Busy
+            <span class="legend-dot busy-dot"></span> Busy (click to book next slot)
+            <span class="legend-dot oos-dot"></span> Out of Service
         </div>
 
     </main>
 
-    <!-- ======================================================= FOOTER -->
     <footer class="site-footer">
         <p>© 2025 ResidenceLaundry · Data refreshes every 30 seconds</p>
     </footer>

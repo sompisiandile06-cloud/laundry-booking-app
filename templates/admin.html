@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResidenceLaundry — Admin Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+    <!-- ======================================================= HEADER -->
+    <header class="site-header">
+        <div class="header-inner">
+            <div class="brand">
+                <span class="brand-icon">⬡</span>
+                <span class="brand-name">ResidenceLaundry</span>
+                <span class="admin-badge">Admin</span>
+            </div>
+            <nav>
+                <a href="/" class="nav-link">Student View</a>
+                <a href="/admin/logout" class="nav-link nav-cta">Sign Out</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- ======================================================= HERO -->
+    <section class="hero hero-small">
+        <p class="hero-label">Control Panel</p>
+        <h1 class="hero-title">Dashboard</h1>
+        <p class="hero-sub">Monitor bookings, manage machines, and keep the laundry room running smoothly.</p>
+    </section>
+
+    <main class="main-content">
+
+        <!-- ======================================================= STATS -->
+        <div id="stats-grid" class="stats-grid">
+            <!-- Filled by JS -->
+            <div class="stat-card skeleton"></div>
+            <div class="stat-card skeleton"></div>
+            <div class="stat-card skeleton"></div>
+            <div class="stat-card skeleton"></div>
+        </div>
+
+        <!-- ======================================================= MACHINES -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2 class="section-title">Machines</h2>
+                <span class="section-hint">Toggle machines in/out of service</span>
+            </div>
+            <div id="admin-machines-grid" class="machines-grid">
+                <div class="machine-card skeleton" style="height:160px;"></div>
+                <div class="machine-card skeleton" style="height:160px;"></div>
+                <div class="machine-card skeleton" style="height:160px;"></div>
+            </div>
+        </section>
+
+        <!-- ======================================================= BOOKINGS -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2 class="section-title">Bookings</h2>
+                <!-- Filter tabs -->
+                <div class="booking-filter-tabs">
+                    <button class="filter-btn active" data-status="all"    onclick="filterBookings('all')">All</button>
+                    <button class="filter-btn"         data-status="Active"     onclick="filterBookings('Active')">Active</button>
+                    <button class="filter-btn"         data-status="Completed"  onclick="filterBookings('Completed')">Completed</button>
+                    <button class="filter-btn"         data-status="Cancelled"  onclick="filterBookings('Cancelled')">Cancelled</button>
+                </div>
+            </div>
+
+            <div id="bookings-loading" class="loading-state">
+                <div class="spinner"></div><p>Loading bookings…</p>
+            </div>
+
+            <div id="bookings-table-wrap" class="table-wrap hidden">
+                <table class="bookings-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Student</th>
+                            <th>Room</th>
+                            <th>Machine</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bookings-tbody"></tbody>
+                </table>
+            </div>
+
+            <div id="bookings-empty" class="empty-state hidden">
+                <p>No bookings found for this filter.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="site-footer">
+        <p>© 2025 ResidenceLaundry · Admin Dashboard · Data refreshes every 30 seconds</p>
+    </footer>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>

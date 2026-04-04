@@ -616,3 +616,290 @@ nav {
     .filter-bar { flex-wrap: wrap; }
     .header-inner { padding: 0 16px; }
 }
+
+/* ================================================================
+   ADMIN — Login Page
+   ================================================================ */
+.login-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+.login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 44px 40px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: var(--shadow-lg);
+}
+
+.login-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 28px;
+}
+
+.login-title {
+    font-family: var(--font-serif);
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.login-sub {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 28px;
+}
+
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+/* ================================================================
+   ADMIN — Dashboard
+   ================================================================ */
+.admin-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 100px;
+    margin-left: 4px;
+}
+
+/* Stats grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 48px;
+}
+
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 22px 20px;
+    box-shadow: var(--shadow-sm);
+}
+
+.stat-card.skeleton {
+    height: 90px;
+    background: linear-gradient(90deg, var(--border) 25%, var(--surface-2) 50%, var(--border) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+}
+
+.stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.stat-value {
+    font-family: var(--font-serif);
+    font-size: 36px;
+    line-height: 1;
+    color: var(--text-primary);
+}
+
+.stat-value-sm { font-size: 22px; }
+
+.stat-of {
+    font-size: 18px;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+}
+
+/* Admin section */
+.admin-section { margin-bottom: 52px; }
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.section-title {
+    font-family: var(--font-serif);
+    font-size: 22px;
+}
+
+.section-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.booking-filter-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* Bookings table */
+.table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.bookings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.bookings-table th {
+    background: var(--surface-2);
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.bookings-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+    vertical-align: middle;
+}
+
+.bookings-table tr:last-child td { border-bottom: none; }
+
+.bookings-table tr:hover td { background: var(--surface-2); }
+
+/* Status badges inside the table */
+.booking-status {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.status-active    { background: var(--available-bg); color: var(--available); }
+.status-completed { background: var(--surface-2);    color: var(--text-muted); border: 1px solid var(--border); }
+.status-cancelled { background: var(--busy-bg);      color: var(--busy); }
+
+/* Cancel button inside table */
+.btn-cancel {
+    padding: 5px 12px;
+    background: var(--busy-bg);
+    color: var(--busy);
+    border: 1px solid #f5c6c6;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.btn-cancel:hover { background: var(--busy); color: #fff; }
+
+.no-action { color: var(--text-muted); font-size: 13px; }
+
+/* Machine toggle buttons */
+.btn-deactivate {
+    background: var(--busy-bg) !important;
+    color: var(--busy) !important;
+}
+.btn-deactivate:hover { background: var(--busy) !important; color: #fff !important; }
+
+.btn-activate {
+    background: var(--available-bg) !important;
+    color: var(--available) !important;
+}
+.btn-activate:hover { background: var(--available) !important; color: #fff !important; }
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 48px;
+    color: var(--text-muted);
+    font-size: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+/* ================================================================
+   OUT OF SERVICE machine card
+   ================================================================ */
+.machine-card.out-of-service {
+    opacity: 0.7;
+}
+
+.machine-card.out-of-service::before { background: var(--text-muted); }
+
+.status-badge.oos {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+.oos-dot { background: var(--text-muted); }
+
+/* Next slot hint on busy cards */
+.next-slot-hint {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--accent) !important;
+}
+
+.btn-book-next {
+    background: var(--accent) !important;
+}
+
+.btn-book-next:hover {
+    background: #a8501f !important;
+}
+
+/* ================================================================
+   TOAST notifications
+   ================================================================ */
+.toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    padding: 14px 20px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    z-index: 9999;
+    animation: fadeUp 200ms ease;
+    max-width: 320px;
+}
+
+.toast-success { background: var(--available); color: #fff; }
+.toast-error   { background: var(--busy);      color: #fff; }
+
+/* ================================================================
+   SKELETON shimmer animation
+   ================================================================ */
+@keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}

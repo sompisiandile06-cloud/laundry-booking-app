@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResidenceLaundry — Admin Login</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body class="login-body">
+
+    <div class="login-card">
+        <div class="login-brand">
+            <span class="brand-icon">⬡</span>
+            <span class="brand-name">ResidenceLaundry</span>
+        </div>
+
+        <h1 class="login-title">Admin Access</h1>
+        <p class="login-sub">Enter your password to access the dashboard.</p>
+
+        {% if error %}
+        <div class="feedback-msg error-msg" style="margin-bottom:20px;">
+            <span class="feedback-icon">✕</span>
+            <div><strong>{{ error }}</strong></div>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/admin/login" class="login-form">
+            <div class="field-group">
+                <label class="field-label" for="password">Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    class="field-input"
+                    placeholder="Enter admin password"
+                    autofocus
+                    required
+                />
+            </div>
+            <button type="submit" class="submit-btn" style="margin-top:8px;">
+                Sign In
+            </button>
+        </form>
+
+        <a href="/" class="back-link" style="display:block; text-align:center; margin-top:20px;">
+            ← Back to student view
+        </a>
+    </div>
+
+</body>
+</html>
