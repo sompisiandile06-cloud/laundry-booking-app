@@ -1,14 +1,22 @@
 """
-Laundry Booking System — Backend (Flask)
-=========================================
-A REST API that handles machine listings, booking creation,
-conflict detection, and status computation.
+Laundry Booking System — Backend (Flask + PostgreSQL)
+======================================================
+v3 — Adds:
+  - Admin dashboard with password protection
+  - GET  /admin/stats          → overview numbers
+  - GET  /admin/bookings        → full booking history with filters
+  - DELETE /admin/bookings/<id> → cancel a booking
+  - PATCH /admin/machines/<id>  → toggle machine active/inactive
+  - GET  /machines/<id>/next-slot → next available time slot
 """
 
-import sqlite3
 import os
-from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+
+import psycopg2
+import psycopg2.extras
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for
 
 # ---------------------------------------------------------------------------
 # App configuration
@@ -16,13 +24,19 @@ from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
-# Path to the SQLite database file (sits next to app.py)
-DB_PATH = os.path.join(os.path.dirname(__file__), "database.db")
+# Secret key is required for session (stores admin login state).
+# On Railway, set this as an environment variable called SECRET_KEY.
+# Falls back to a default for local development only.
+app.secret_key = os.environ.get("SECRET_KEY", "laundry-dev-secret-change-in-production")
 
-# Cycle durations (in minutes) for each machine type
+# Admin password — set ADMIN_PASSWORD environment variable on Railway.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 CYCLE_DURATIONS = {
     "Washer": 45,
-    "Dryer": 60,
+    "Dryer":  60,
 }
 
 
@@ -31,179 +45,268 @@ CYCLE_DURATIONS = {
 # ---------------------------------------------------------------------------
 
 def get_db_connection():
-    """Open a new database connection and configure it to return dict-like rows."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row   # lets us access columns by name
-    conn.execute("PRAGMA foreign_keys = ON")  # enforce foreign-key constraints
+    """Open a PostgreSQL connection with dict-like row access."""
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 
 def init_db():
     """
-    Create tables and seed the machines table with initial data.
-    Safe to call multiple times — uses IF NOT EXISTS / INSERT OR IGNORE.
+    Create all tables and seed machines.
+    v3 adds: is_active column to machines table.
     """
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur  = conn.cursor()
 
-    # ---- machines table ----
+    # machines — added is_active so admin can disable broken machines
     cur.execute("""
         CREATE TABLE IF NOT EXISTS machines (
-            id   INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT    NOT NULL,
-            type TEXT    NOT NULL CHECK(type IN ('Washer', 'Dryer'))
+            id        SERIAL  PRIMARY KEY,
+            name      TEXT    NOT NULL,
+            type      TEXT    NOT NULL CHECK(type IN ('Washer', 'Dryer')),
+            is_active BOOLEAN NOT NULL DEFAULT TRUE
         )
     """)
 
-    # ---- bookings table ----
+    # bookings — unchanged from v2
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_name TEXT    NOT NULL,
-            room_number  TEXT    NOT NULL,
-            machine_id   INTEGER NOT NULL REFERENCES machines(id),
-            start_time   TEXT    NOT NULL,   -- ISO-8601 datetime string
-            end_time     TEXT    NOT NULL,   -- ISO-8601 datetime string
-            status       TEXT    NOT NULL DEFAULT 'Active'
-                             CHECK(status IN ('Active', 'Completed'))
+            id           SERIAL    PRIMARY KEY,
+            student_name TEXT      NOT NULL,
+            room_number  TEXT      NOT NULL,
+            machine_id   INTEGER   NOT NULL REFERENCES machines(id),
+            start_time   TIMESTAMP NOT NULL,
+            end_time     TIMESTAMP NOT NULL,
+            status       TEXT      NOT NULL DEFAULT 'Active'
+                             CHECK(status IN ('Active', 'Completed', 'Cancelled'))
         )
     """)
 
-    # ---- seed machines (only if the table is empty) ----
+    # Add is_active column if upgrading from an older version of the schema
+    cur.execute("""
+        ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
+    """)
+
+    # Add Cancelled to the status check if upgrading
+    # (PostgreSQL doesn't support ALTER CHECK directly — we drop and re-add)
+    cur.execute("""
+        ALTER TABLE bookings DROP CONSTRAINT IF EXISTS bookings_status_check
+    """)
+    cur.execute("""
+        ALTER TABLE bookings ADD CONSTRAINT bookings_status_check
+            CHECK(status IN ('Active', 'Completed', 'Cancelled'))
+    """)
+
+    # Seed machines only if table is empty
     cur.execute("SELECT COUNT(*) FROM machines")
-    if cur.fetchone()[0] == 0:
-        machines_seed = [
-            ("Washer 1", "Washer"),
-            ("Washer 2", "Washer"),
-            ("Washer 3", "Washer"),
-            ("Dryer 1",  "Dryer"),
-            ("Dryer 2",  "Dryer"),
-        ]
+    if cur.fetchone()["count"] == 0:
         cur.executemany(
-            "INSERT INTO machines (name, type) VALUES (?, ?)",
-            machines_seed,
+            "INSERT INTO machines (name, type) VALUES (%s, %s)",
+            [
+                ("Washer 1", "Washer"),
+                ("Washer 2", "Washer"),
+                ("Washer 3", "Washer"),
+                ("Dryer 1",  "Dryer"),
+                ("Dryer 2",  "Dryer"),
+            ],
         )
 
     conn.commit()
+    cur.close()
     conn.close()
-    print("✅ Database initialised.")
+    print("✅ PostgreSQL database initialised (v3).")
+
+
+# ---------------------------------------------------------------------------
+# Admin auth helper
+# ---------------------------------------------------------------------------
+
+def admin_required(f):
+    """
+    Decorator that protects admin routes.
+    Redirects to /admin/login if the admin is not logged in.
+    Usage: add @admin_required above any admin route function.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return redirect(url_for("admin_login"))
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ---------------------------------------------------------------------------
 # Business logic helpers
 # ---------------------------------------------------------------------------
 
-def compute_machine_status(machine_id: int, now: datetime) -> dict:
-    """
-    Look up the current Active booking for a machine (if any) and return a
-    status dictionary.
-
-    Returns:
-        { "status": "Available" }
-        OR
-        { "status": "Busy", "busy_until": "<ISO string>", "booked_by": "..." }
-    """
+def expire_old_bookings():
+    """Mark Active bookings whose end_time has passed as Completed."""
     conn = get_db_connection()
-    row = conn.execute(
+    cur  = conn.cursor()
+    cur.execute("""
+        UPDATE bookings SET status = 'Completed'
+        WHERE  status = 'Active' AND end_time <= NOW()
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def compute_machine_status(machine_id: int, now: datetime) -> dict:
+    """Return current status dict for a single machine."""
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute(
         """
         SELECT student_name, room_number, end_time
         FROM   bookings
-        WHERE  machine_id = ?
-          AND  status     = 'Active'
-          AND  end_time   > ?
-        ORDER  BY end_time ASC
-        LIMIT  1
+        WHERE  machine_id = %s AND status = 'Active' AND end_time > %s
+        ORDER  BY end_time ASC LIMIT 1
         """,
-        (machine_id, now.isoformat()),
-    ).fetchone()
+        (machine_id, now),
+    )
+    row = cur.fetchone()
+    cur.close()
     conn.close()
 
     if row is None:
         return {"status": "Available"}
-
     return {
         "status":     "Busy",
-        "busy_until": row["end_time"],
+        "busy_until": row["end_time"].isoformat(),
         "booked_by":  f"{row['student_name']} (Room {row['room_number']})",
     }
 
 
-def has_booking_conflict(machine_id: int, new_start: datetime, new_end: datetime) -> bool:
+def get_next_available_slot(machine_id: int, machine_type: str) -> datetime:
     """
-    Returns True if the requested time slot overlaps with any existing Active
-    booking for the machine.
+    Find the earliest datetime this machine is free.
+    Works by looking at all future Active bookings sorted by start time,
+    then finding the first gap big enough for one cycle.
 
-    Overlap condition (standard interval overlap):
-        new_start < existing_end  AND  new_end > existing_start
+    Returns: a datetime object for the next free start time.
     """
+    duration = timedelta(minutes=CYCLE_DURATIONS[machine_type])
+    now      = datetime.now(timezone.utc).replace(tzinfo=None)
+
     conn = get_db_connection()
-    conflict = conn.execute(
+    cur  = conn.cursor()
+    # Get all future/current active bookings sorted by start time
+    cur.execute(
         """
-        SELECT id FROM bookings
-        WHERE  machine_id = ?
-          AND  status     = 'Active'
-          AND  start_time < ?    -- existing starts before new ends
-          AND  end_time   > ?    -- existing ends   after new starts
-        LIMIT  1
+        SELECT start_time, end_time FROM bookings
+        WHERE  machine_id = %s AND status = 'Active' AND end_time > %s
+        ORDER  BY start_time ASC
         """,
-        (machine_id, new_end.isoformat(), new_start.isoformat()),
-    ).fetchone()
+        (machine_id, now),
+    )
+    bookings = cur.fetchall()
+    cur.close()
     conn.close()
 
+    # If there are no active bookings, the machine is free right now
+    if not bookings:
+        return now
+
+    # Walk through bookings and look for a gap between consecutive slots
+    # First check: can we fit a slot before the first booking starts?
+    candidate = now
+    for booking in bookings:
+        b_start = booking["start_time"]
+        b_end   = booking["end_time"]
+
+        # If our candidate slot ends before this booking starts — it fits!
+        if candidate + duration <= b_start:
+            return candidate
+
+        # Otherwise push candidate to after this booking ends
+        if b_end > candidate:
+            candidate = b_end
+
+    # No gap found between bookings — next slot is after the last booking ends
+    return candidate
+
+
+def has_booking_conflict(machine_id: int, new_start: datetime, new_end: datetime) -> bool:
+    """Return True if the slot overlaps any existing Active booking."""
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute(
+        """
+        SELECT id FROM bookings
+        WHERE  machine_id = %s AND status = 'Active'
+          AND  start_time < %s AND end_time > %s
+        LIMIT  1
+        """,
+        (machine_id, new_end, new_start),
+    )
+    conflict = cur.fetchone()
+    cur.close()
+    conn.close()
     return conflict is not None
 
 
-def expire_old_bookings():
-    """
-    Mark bookings as Completed when their end_time has passed.
-    Called at the start of each request so statuses stay accurate.
-    """
-    now = datetime.now().isoformat()
-    conn = get_db_connection()
-    conn.execute(
-        """
-        UPDATE bookings
-        SET    status = 'Completed'
-        WHERE  status = 'Active'
-          AND  end_time <= ?
-        """,
-        (now,),
-    )
-    conn.commit()
-    conn.close()
-
-
 # ---------------------------------------------------------------------------
-# Routes — Pages
+# Routes — Public Pages
 # ---------------------------------------------------------------------------
 
 @app.route("/")
 def home():
-    """Serve the main machine-status page."""
     return render_template("index.html")
 
 
 @app.route("/book")
 def book_page():
-    """Serve the booking form page."""
     return render_template("book.html")
 
 
 # ---------------------------------------------------------------------------
-# Routes — REST API
+# Routes — Admin Pages
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Show login form (GET) or process login (POST)."""
+    error = None
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == ADMIN_PASSWORD:
+            session["admin_logged_in"] = True
+            return redirect(url_for("admin_dashboard"))
+        else:
+            error = "Incorrect password. Try again."
+    return render_template("admin_login.html", error=error)
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    """Clear the admin session and redirect to login."""
+    session.pop("admin_logged_in", None)
+    return redirect(url_for("admin_login"))
+
+
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    """Serve the admin dashboard page."""
+    return render_template("admin.html")
+
+
+# ---------------------------------------------------------------------------
+# Routes — Public REST API
 # ---------------------------------------------------------------------------
 
 @app.route("/machines", methods=["GET"])
 def get_machines():
-    """
-    GET /machines
-    Returns every machine with its current status and cycle duration.
-    """
-    expire_old_bookings()   # keep statuses fresh
-
-    now = datetime.now()
+    """GET /machines — all active machines with current status and next slot."""
+    expire_old_bookings()
+    now  = datetime.now(timezone.utc).replace(tzinfo=None)
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM machines ORDER BY type, name").fetchall()
+    cur  = conn.cursor()
+    # Only show active machines to students
+    cur.execute("SELECT * FROM machines WHERE is_active = TRUE ORDER BY type, name")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
     machines = []
@@ -211,55 +314,71 @@ def get_machines():
         machine = dict(row)
         machine["duration_minutes"] = CYCLE_DURATIONS[row["type"]]
         machine.update(compute_machine_status(row["id"], now))
+        # Calculate next available slot so the frontend can show it
+        next_slot = get_next_available_slot(row["id"], row["type"])
+        machine["next_available"] = next_slot.isoformat()
         machines.append(machine)
 
     return jsonify(machines)
 
 
-@app.route("/bookings", methods=["GET"])
-def get_bookings():
-    """
-    GET /bookings
-    Returns all bookings (most recent first) joined with machine names.
-    """
-    expire_old_bookings()
-
+@app.route("/machines/<int:machine_id>/next-slot", methods=["GET"])
+def get_next_slot(machine_id):
+    """GET /machines/<id>/next-slot — returns next free start time for one machine."""
     conn = get_db_connection()
-    rows = conn.execute(
-        """
-        SELECT b.id, b.student_name, b.room_number, b.start_time,
-               b.end_time, b.status, m.name AS machine_name, m.type AS machine_type
-        FROM   bookings b
-        JOIN   machines m ON b.machine_id = m.id
-        ORDER  BY b.start_time DESC
-        """
-    ).fetchall()
+    cur  = conn.cursor()
+    cur.execute("SELECT * FROM machines WHERE id = %s", (machine_id,))
+    machine = cur.fetchone()
+    cur.close()
     conn.close()
 
-    return jsonify([dict(r) for r in rows])
+    if machine is None:
+        return jsonify({"error": "Machine not found"}), 404
+
+    next_slot = get_next_available_slot(machine_id, machine["type"])
+    return jsonify({
+        "machine_id":     machine_id,
+        "machine_name":   machine["name"],
+        "next_available": next_slot.isoformat(),
+    })
+
+
+@app.route("/bookings", methods=["GET"])
+def get_bookings():
+    """GET /bookings — all bookings most recent first."""
+    expire_old_bookings()
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute(
+        """
+        SELECT b.id, b.student_name, b.room_number,
+               b.start_time, b.end_time, b.status,
+               m.name AS machine_name, m.type AS machine_type
+        FROM   bookings b JOIN machines m ON b.machine_id = m.id
+        ORDER  BY b.start_time DESC
+        """
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    bookings = []
+    for row in rows:
+        b = dict(row)
+        b["start_time"] = b["start_time"].isoformat()
+        b["end_time"]   = b["end_time"].isoformat()
+        bookings.append(b)
+    return jsonify(bookings)
 
 
 @app.route("/book", methods=["POST"])
 def create_booking():
-    """
-    POST /book
-    Expected JSON body:
-        {
-            "student_name": "Alice Smith",
-            "room_number":  "204",
-            "machine_id":   1,
-            "start_time":   "2025-06-15T09:00"
-        }
-
-    Validates input, checks for conflicts, and inserts the booking.
-    """
+    """POST /book — validate, conflict-check, and create a booking."""
     expire_old_bookings()
-
     data = request.get_json()
 
-    # ---- 1. Validate that required fields are present ----
     required = ["student_name", "room_number", "machine_id", "start_time"]
-    missing = [f for f in required if not data.get(f)]
+    missing  = [f for f in required if not data.get(f)]
     if missing:
         return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
 
@@ -267,52 +386,55 @@ def create_booking():
     room_number  = str(data["room_number"]).strip()
     machine_id   = data["machine_id"]
 
-    # ---- 2. Parse and validate start_time ----
     try:
-        start_time = datetime.fromisoformat(data["start_time"])
-    except ValueError:
-        return jsonify({"error": "Invalid start_time format. Use ISO-8601 (e.g. 2025-06-15T09:00)"}), 400
+        # The browser sends local time (e.g. SA time UTC+2).
+        # We convert it to UTC before storing so it lines up with
+        # PostgreSQL's NOW() which is always UTC on Railway.
+        local_start = datetime.fromisoformat(data["start_time"])
 
-    # Bookings must be in the future
-    if start_time < datetime.now():
+        # utc_offset is sent by the browser in minutes (e.g. -120 for UTC+2)
+        # A negative offset means ahead of UTC, so we ADD it to get UTC.
+        utc_offset_minutes = int(data.get("utc_offset", 0))
+        start_time = local_start + timedelta(minutes=utc_offset_minutes)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid start_time format. Use ISO-8601."}), 400
+
+    if start_time < datetime.now(timezone.utc).replace(tzinfo=None):
         return jsonify({"error": "Start time must be in the future."}), 400
 
-    # ---- 3. Look up the machine to get its type ----
-    conn = get_db_connection()
-    machine = conn.execute(
-        "SELECT * FROM machines WHERE id = ?", (machine_id,)
-    ).fetchone()
+    conn    = get_db_connection()
+    cur     = conn.cursor()
+    cur.execute("SELECT * FROM machines WHERE id = %s AND is_active = TRUE", (machine_id,))
+    machine = cur.fetchone()
+    cur.close()
     conn.close()
 
     if machine is None:
-        return jsonify({"error": f"Machine with id={machine_id} does not exist."}), 404
+        return jsonify({"error": "Machine not found or is currently out of service."}), 404
 
-    # ---- 4. Calculate end_time based on machine type ----
-    duration    = timedelta(minutes=CYCLE_DURATIONS[machine["type"]])
-    end_time    = start_time + duration
+    duration = timedelta(minutes=CYCLE_DURATIONS[machine["type"]])
+    end_time = start_time + duration
 
-    # ---- 5. Check for booking conflicts ----
     if has_booking_conflict(machine_id, start_time, end_time):
+        # Find the next available slot and include it in the error response
+        next_slot = get_next_available_slot(machine_id, machine["type"])
         return jsonify({
-            "error": (
-                f"{machine['name']} is already booked during that time. "
-                f"Please choose a different time slot."
-            )
-        }), 409   # HTTP 409 Conflict
+            "error":          f"{machine['name']} is already booked during that time.",
+            "next_available": next_slot.isoformat(),
+        }), 409
 
-    # ---- 6. Insert the booking ----
     conn = get_db_connection()
-    cur  = conn.execute(
+    cur  = conn.cursor()
+    cur.execute(
         """
-        INSERT INTO bookings
-            (student_name, room_number, machine_id, start_time, end_time, status)
-        VALUES (?, ?, ?, ?, ?, 'Active')
+        INSERT INTO bookings (student_name, room_number, machine_id, start_time, end_time, status)
+        VALUES (%s, %s, %s, %s, %s, 'Active') RETURNING id
         """,
-        (student_name, room_number, machine_id,
-         start_time.isoformat(), end_time.isoformat()),
+        (student_name, room_number, machine_id, start_time, end_time),
     )
-    booking_id = cur.lastrowid
+    booking_id = cur.fetchone()["id"]
     conn.commit()
+    cur.close()
     conn.close()
 
     return jsonify({
@@ -321,7 +443,221 @@ def create_booking():
         "machine":    machine["name"],
         "start_time": start_time.isoformat(),
         "end_time":   end_time.isoformat(),
-    }), 201   # HTTP 201 Created
+    }), 201
+
+
+# ---------------------------------------------------------------------------
+# Routes — Admin REST API (all protected by @admin_required)
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/stats", methods=["GET"])
+@admin_required
+def admin_stats():
+    """
+    GET /admin/stats
+    Returns overview numbers for the dashboard header cards.
+    """
+    expire_old_bookings()
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # Total bookings today
+    cur.execute("""
+        SELECT COUNT(*) FROM bookings
+        WHERE  start_time::date = CURRENT_DATE
+    """)
+    bookings_today = cur.fetchone()["count"]
+
+    # Currently active (busy right now)
+    cur.execute("""
+        SELECT COUNT(*) FROM bookings
+        WHERE  status = 'Active' AND start_time <= NOW() AND end_time > NOW()
+    """)
+    active_now = cur.fetchone()["count"]
+
+    # Total machines and how many are active
+    cur.execute("SELECT COUNT(*) FROM machines")
+    total_machines = cur.fetchone()["count"]
+
+    cur.execute("SELECT COUNT(*) FROM machines WHERE is_active = TRUE")
+    active_machines = cur.fetchone()["count"]
+
+    # Most booked machine this week
+    cur.execute("""
+        SELECT m.name, COUNT(b.id) AS total
+        FROM   bookings b JOIN machines m ON b.machine_id = m.id
+        WHERE  b.start_time >= NOW() - INTERVAL '7 days'
+        GROUP  BY m.name ORDER BY total DESC LIMIT 1
+    """)
+    top_row = cur.fetchone()
+    top_machine = top_row["name"] if top_row else "N/A"
+
+    # Upcoming bookings (next 24 hours)
+    cur.execute("""
+        SELECT COUNT(*) FROM bookings
+        WHERE  status = 'Active'
+          AND  start_time > NOW()
+          AND  start_time <= NOW() + INTERVAL '24 hours'
+    """)
+    upcoming = cur.fetchone()["count"]
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "bookings_today":  bookings_today,
+        "active_now":      active_now,
+        "total_machines":  total_machines,
+        "active_machines": active_machines,
+        "top_machine":     top_machine,
+        "upcoming_24h":    upcoming,
+    })
+
+
+@app.route("/admin/bookings", methods=["GET"])
+@admin_required
+def admin_get_bookings():
+    """
+    GET /admin/bookings
+    Returns all bookings with optional ?status= filter.
+    e.g. /admin/bookings?status=Active
+    """
+    expire_old_bookings()
+
+    status_filter = request.args.get("status")  # optional query param
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    if status_filter and status_filter in ("Active", "Completed", "Cancelled"):
+        cur.execute(
+            """
+            SELECT b.id, b.student_name, b.room_number,
+                   b.start_time, b.end_time, b.status,
+                   m.name AS machine_name, m.type AS machine_type
+            FROM   bookings b JOIN machines m ON b.machine_id = m.id
+            WHERE  b.status = %s
+            ORDER  BY b.start_time DESC
+            """,
+            (status_filter,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT b.id, b.student_name, b.room_number,
+                   b.start_time, b.end_time, b.status,
+                   m.name AS machine_name, m.type AS machine_type
+            FROM   bookings b JOIN machines m ON b.machine_id = m.id
+            ORDER  BY b.start_time DESC
+            """
+        )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    bookings = []
+    for row in rows:
+        b = dict(row)
+        b["start_time"] = b["start_time"].isoformat()
+        b["end_time"]   = b["end_time"].isoformat()
+        bookings.append(b)
+
+    return jsonify(bookings)
+
+
+@app.route("/admin/bookings/<int:booking_id>", methods=["DELETE"])
+@admin_required
+def admin_cancel_booking(booking_id):
+    """
+    DELETE /admin/bookings/<id>
+    Cancels an Active booking. Sets status to 'Cancelled' rather than
+    deleting the row so there is always a full audit trail.
+    """
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    cur.execute("SELECT * FROM bookings WHERE id = %s", (booking_id,))
+    booking = cur.fetchone()
+
+    if booking is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Booking not found."}), 404
+
+    if booking["status"] != "Active":
+        cur.close()
+        conn.close()
+        return jsonify({"error": f"Cannot cancel a booking with status '{booking['status']}'."}), 400
+
+    cur.execute(
+        "UPDATE bookings SET status = 'Cancelled' WHERE id = %s",
+        (booking_id,),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": f"Booking #{booking_id} has been cancelled."})
+
+
+@app.route("/admin/machines", methods=["GET"])
+@admin_required
+def admin_get_machines():
+    """GET /admin/machines — all machines including inactive ones."""
+    expire_old_bookings()
+    now  = datetime.now(timezone.utc).replace(tzinfo=None)
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT * FROM machines ORDER BY type, name")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    machines = []
+    for row in rows:
+        machine = dict(row)
+        machine["duration_minutes"] = CYCLE_DURATIONS[row["type"]]
+        if row["is_active"]:
+            machine.update(compute_machine_status(row["id"], now))
+        else:
+            machine["status"] = "Out of Service"
+        machines.append(machine)
+    return jsonify(machines)
+
+
+@app.route("/admin/machines/<int:machine_id>", methods=["PATCH"])
+@admin_required
+def admin_toggle_machine(machine_id):
+    """
+    PATCH /admin/machines/<id>
+    Toggles a machine between active and inactive (out of service).
+    Body: { "is_active": true } or { "is_active": false }
+    """
+    data      = request.get_json()
+    is_active = data.get("is_active")
+
+    if is_active is None or not isinstance(is_active, bool):
+        return jsonify({"error": "Body must include is_active: true or false"}), 400
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT id FROM machines WHERE id = %s", (machine_id,))
+    if cur.fetchone() is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Machine not found."}), 404
+
+    cur.execute(
+        "UPDATE machines SET is_active = %s WHERE id = %s",
+        (is_active, machine_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    status_word = "activated" if is_active else "marked as out of service"
+    return jsonify({"message": f"Machine #{machine_id} has been {status_word}."})
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +665,6 @@ def create_booking():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    init_db()                        # create tables + seed data if needed
-
-    # Railway injects a PORT environment variable — we read it here.
-    # If running locally, it falls back to port 5000.
-    import os
+    init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
