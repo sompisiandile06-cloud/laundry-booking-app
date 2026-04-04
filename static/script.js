@@ -259,11 +259,6 @@ async function submitBooking() {
     show(btnSpinner);
 
     try {
-        // getTimezoneOffset() returns minutes BEHIND UTC.
-        // e.g. SA (UTC+2) returns -120. We send this to the server
-        // so it can convert the local time to UTC before saving.
-        const utcOffset = new Date().getTimezoneOffset();
-
         const response = await fetch(`${API_BASE}/book`, {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
@@ -271,8 +266,7 @@ async function submitBooking() {
                 student_name: studentName,
                 room_number:  roomNumber,
                 machine_id:   parseInt(machineId, 10),
-                start_time:   startTime,  // local time — server converts using utc_offset
-                utc_offset:   utcOffset,  // e.g. -120 for UTC+2 (South Africa)
+                start_time:   startTime,  // SA local time — stored as-is, compared in SA tz
             }),
         });
 

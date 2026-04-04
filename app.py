@@ -140,12 +140,18 @@ def admin_required(f):
 # ---------------------------------------------------------------------------
 
 def expire_old_bookings():
-    """Mark Active bookings whose end_time has passed as Completed."""
+    """
+    Mark Active bookings whose end_time has passed as Completed.
+    We compare end_time against NOW() AT TIME ZONE 'Africa/Johannesburg'
+    so the comparison always uses SA local time regardless of where
+    the server is running.
+    """
     conn = get_db_connection()
     cur  = conn.cursor()
     cur.execute("""
         UPDATE bookings SET status = 'Completed'
-        WHERE  status = 'Active' AND end_time <= NOW()
+        WHERE  status = 'Active'
+          AND  end_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg')
     """)
     conn.commit()
     cur.close()
@@ -160,10 +166,11 @@ def compute_machine_status(machine_id: int, now: datetime) -> dict:
         """
         SELECT student_name, room_number, end_time
         FROM   bookings
-        WHERE  machine_id = %s AND status = 'Active' AND end_time > %s
+        WHERE  machine_id = %s AND status = 'Active'
+          AND  end_time > (NOW() AT TIME ZONE 'Africa/Johannesburg')
         ORDER  BY end_time ASC LIMIT 1
         """,
-        (machine_id, now),
+        (machine_id,),
     )
     row = cur.fetchone()
     cur.close()
@@ -187,7 +194,8 @@ def get_next_available_slot(machine_id: int, machine_type: str) -> datetime:
     Returns: a datetime object for the next free start time.
     """
     duration = timedelta(minutes=CYCLE_DURATIONS[machine_type])
-    now      = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Use SA local time (UTC+2) to match stored booking times
+    now      = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
 
     conn = get_db_connection()
     cur  = conn.cursor()
@@ -300,7 +308,8 @@ def admin_dashboard():
 def get_machines():
     """GET /machines — all active machines with current status and next slot."""
     expire_old_bookings()
-    now  = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Use SA local time (UTC+2) to match stored booking times
+    now  = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
     conn = get_db_connection()
     cur  = conn.cursor()
     # Only show active machines to students
@@ -387,19 +396,16 @@ def create_booking():
     machine_id   = data["machine_id"]
 
     try:
-        # The browser sends local time (e.g. SA time UTC+2).
-        # We convert it to UTC before storing so it lines up with
-        # PostgreSQL's NOW() which is always UTC on Railway.
-        local_start = datetime.fromisoformat(data["start_time"])
-
-        # utc_offset is sent by the browser in minutes (e.g. -120 for UTC+2)
-        # A negative offset means ahead of UTC, so we ADD it to get UTC.
-        utc_offset_minutes = int(data.get("utc_offset", 0))
-        start_time = local_start + timedelta(minutes=utc_offset_minutes)
+        # Save the student's local time (SA time) directly.
+        # All comparisons in the DB use Africa/Johannesburg timezone
+        # so everything stays consistent without any conversion.
+        start_time = datetime.fromisoformat(data["start_time"])
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid start_time format. Use ISO-8601."}), 400
 
-    if start_time < datetime.now(timezone.utc).replace(tzinfo=None):
+    # Compare against SA local time — matches how we store and query
+    sa_now = datetime.now(timezone.utc).astimezone().replace(tzinfo=None) + timedelta(hours=2)
+    if start_time < sa_now:
         return jsonify({"error": "Start time must be in the future."}), 400
 
     conn    = get_db_connection()
@@ -461,17 +467,19 @@ def admin_stats():
     conn = get_db_connection()
     cur  = conn.cursor()
 
-    # Total bookings today
+    # Total bookings today — using SA timezone
     cur.execute("""
         SELECT COUNT(*) FROM bookings
-        WHERE  start_time::date = CURRENT_DATE
+        WHERE  start_time::date = (NOW() AT TIME ZONE 'Africa/Johannesburg')::date
     """)
     bookings_today = cur.fetchone()["count"]
 
-    # Currently active (busy right now)
+    # Currently active (busy right now) — using SA timezone
     cur.execute("""
         SELECT COUNT(*) FROM bookings
-        WHERE  status = 'Active' AND start_time <= NOW() AND end_time > NOW()
+        WHERE  status = 'Active'
+          AND  start_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg')
+          AND  end_time   >  (NOW() AT TIME ZONE 'Africa/Johannesburg')
     """)
     active_now = cur.fetchone()["count"]
 
@@ -486,7 +494,7 @@ def admin_stats():
     cur.execute("""
         SELECT m.name, COUNT(b.id) AS total
         FROM   bookings b JOIN machines m ON b.machine_id = m.id
-        WHERE  b.start_time >= NOW() - INTERVAL '7 days'
+        WHERE  b.start_time >= (NOW() AT TIME ZONE 'Africa/Johannesburg') - INTERVAL '7 days'
         GROUP  BY m.name ORDER BY total DESC LIMIT 1
     """)
     top_row = cur.fetchone()
@@ -496,8 +504,8 @@ def admin_stats():
     cur.execute("""
         SELECT COUNT(*) FROM bookings
         WHERE  status = 'Active'
-          AND  start_time > NOW()
-          AND  start_time <= NOW() + INTERVAL '24 hours'
+          AND  start_time > (NOW() AT TIME ZONE 'Africa/Johannesburg')
+          AND  start_time <= (NOW() AT TIME ZONE 'Africa/Johannesburg') + INTERVAL '24 hours'
     """)
     upcoming = cur.fetchone()["count"]
 
@@ -606,7 +614,7 @@ def admin_cancel_booking(booking_id):
 def admin_get_machines():
     """GET /admin/machines — all machines including inactive ones."""
     expire_old_bookings()
-    now  = datetime.now(timezone.utc).replace(tzinfo=None)
+    now  = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
     conn = get_db_connection()
     cur  = conn.cursor()
     cur.execute("SELECT * FROM machines ORDER BY type, name")
@@ -666,5 +674,5 @@ def admin_toggle_machine(machine_id):
 
 if __name__ == "__main__":
     init_db()
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
