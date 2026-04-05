@@ -158,30 +158,47 @@ def expire_old_bookings():
     conn.close()
 
 
-def compute_machine_status(machine_id: int, now: datetime) -> dict:
-    """Return current status dict for a single machine."""
+def get_machine_queue(machine_id: int) -> dict:
+    """
+    Return the full booking queue for a machine — everyone who has
+    an active booking going forward, ordered by start time.
+    Also returns the overall status (Available or Busy).
+    """
     conn = get_db_connection()
     cur  = conn.cursor()
     cur.execute(
         """
-        SELECT student_name, room_number, end_time
+        SELECT student_name, room_number, start_time, end_time
         FROM   bookings
         WHERE  machine_id = %s AND status = 'Active'
           AND  end_time > (NOW() AT TIME ZONE 'Africa/Johannesburg')
-        ORDER  BY end_time ASC LIMIT 1
+        ORDER  BY start_time ASC
         """,
         (machine_id,),
     )
-    row = cur.fetchone()
+    rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    if row is None:
-        return {"status": "Available"}
+    if not rows:
+        return {"status": "Available", "queue": []}
+
+    # Build the queue list — each entry has name, room, start, end
+    queue = []
+    for row in rows:
+        queue.append({
+            "student_name": row["student_name"],
+            "room_number":  row["room_number"],
+            "start_time":   row["start_time"].isoformat(),
+            "end_time":     row["end_time"].isoformat(),
+        })
+
+    # The first entry in the queue is the person currently using the machine
     return {
         "status":     "Busy",
-        "busy_until": row["end_time"].isoformat(),
-        "booked_by":  f"{row['student_name']} (Room {row['room_number']})",
+        "busy_until": rows[0]["end_time"].isoformat(),
+        "booked_by":  f"{rows[0]['student_name']} (Room {rows[0]['room_number']})",
+        "queue":      queue,
     }
 
 
@@ -322,7 +339,8 @@ def get_machines():
     for row in rows:
         machine = dict(row)
         machine["duration_minutes"] = CYCLE_DURATIONS[row["type"]]
-        machine.update(compute_machine_status(row["id"], now))
+        # Get full queue (includes status, busy_until, booked_by, queue list)
+        machine.update(get_machine_queue(row["id"]))
         # Calculate next available slot so the frontend can show it
         next_slot = get_next_available_slot(row["id"], row["type"])
         machine["next_available"] = next_slot.isoformat()
@@ -418,7 +436,13 @@ def create_booking():
     if machine is None:
         return jsonify({"error": "Machine not found or is currently out of service."}), 404
 
-    duration = timedelta(minutes=CYCLE_DURATIONS[machine["type"]])
+    # num_loads lets students book multiple consecutive loads (1, 2, or 3)
+    # Default is 1 if not provided (backwards compatible)
+    num_loads = int(data.get("num_loads", 1))
+    if num_loads not in (1, 2, 3):
+        return jsonify({"error": "num_loads must be 1, 2, or 3."}), 400
+
+    duration = timedelta(minutes=CYCLE_DURATIONS[machine["type"]] * num_loads)
     end_time = start_time + duration
 
     if has_booking_conflict(machine_id, start_time, end_time):
@@ -627,9 +651,10 @@ def admin_get_machines():
         machine = dict(row)
         machine["duration_minutes"] = CYCLE_DURATIONS[row["type"]]
         if row["is_active"]:
-            machine.update(compute_machine_status(row["id"], now))
+            machine.update(get_machine_queue(row["id"]))
         else:
             machine["status"] = "Out of Service"
+            machine["queue"]  = []
         machines.append(machine)
     return jsonify(machines)
 

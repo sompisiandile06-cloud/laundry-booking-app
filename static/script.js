@@ -97,11 +97,28 @@ function renderMachineCards(machines, filterType) {
                 <span class="status-badge available"><span class="status-dot"></span> Available</span>
                 <p class="machine-detail">Cycle: <strong>${machine.duration_minutes} min</strong></p>`;
         } else if (isBusy) {
+            // Build the full queue list showing every booking in order
+            const queueHtml = machine.queue && machine.queue.length > 0
+                ? machine.queue.map((entry, i) => {
+                    const label = i === 0 ? "NOW " : `${i + 1}.  `;
+                    const tag   = i === 0
+                        ? `<span class="queue-tag queue-now">NOW</span>`
+                        : `<span class="queue-tag queue-next">#${i + 1}</span>`;
+                    return `
+                        <div class="queue-entry ${i === 0 ? 'queue-current' : ''}">
+                            ${tag}
+                            <div class="queue-info">
+                                <span class="queue-name">${entry.student_name} · Room ${entry.room_number}</span>
+                                <span class="queue-time">${formatTime(entry.start_time)} – ${formatTime(entry.end_time)}</span>
+                            </div>
+                        </div>`;
+                }).join("")
+                : "";
+
             statusHtml = `
                 <span class="status-badge busy"><span class="status-dot"></span> Busy</span>
-                <p class="machine-detail">Free at: <strong>${formatTime(machine.busy_until)}</strong></p>
-                <p class="machine-detail">Booked by: <strong>${machine.booked_by}</strong></p>
-                <p class="machine-detail next-slot-hint">Next slot: <strong>${nextSlotTime}</strong></p>`;
+                <p class="machine-detail next-slot-hint">Next free slot: <strong>${nextSlotTime}</strong></p>
+                <div class="queue-list">${queueHtml}</div>`;
         } else {
             statusHtml = `<span class="status-badge oos"><span class="status-dot"></span> Out of Service</span>`;
         }
@@ -205,17 +222,22 @@ async function loadMachineDropdown() {
 }
 
 function updateDurationHint() {
-    const select = document.getElementById("machine-select");
-    const hint   = document.getElementById("duration-hint");
+    const select    = document.getElementById("machine-select");
+    const loadsEl   = document.getElementById("num-loads");
+    const hint      = document.getElementById("duration-hint");
     if (!select || !hint) return;
 
     const opt = select.options[select.selectedIndex];
     if (!opt || !opt.dataset.type) {
-        hint.textContent = "Select a machine to see cycle duration.";
+        hint.textContent = "Select a machine to see total duration.";
         return;
     }
-    const duration = CYCLE_DURATIONS[opt.dataset.type];
-    hint.textContent = `${opt.dataset.type} cycle = ${duration} minutes. End time calculated automatically.`;
+
+    const numLoads    = loadsEl ? parseInt(loadsEl.value, 10) : 1;
+    const perLoad     = CYCLE_DURATIONS[opt.dataset.type];
+    const totalMins   = perLoad * numLoads;
+    const loadLabel   = numLoads === 1 ? "1 load" : `${numLoads} loads`;
+    hint.textContent  = `${opt.dataset.type} · ${loadLabel} = ${totalMins} minutes total. End time calculated automatically.`;
 }
 
 function initDateTimePicker() {
@@ -240,6 +262,7 @@ async function submitBooking() {
     const roomNumber  = document.getElementById("room-number").value.trim();
     const machineId   = document.getElementById("machine-select").value;
     const startTime   = document.getElementById("start-time").value;
+    const numLoads    = parseInt(document.getElementById("num-loads")?.value || "1", 10);
 
     const successMsg = document.getElementById("success-msg");
     const errorMsg   = document.getElementById("error-msg");
@@ -267,6 +290,7 @@ async function submitBooking() {
                 room_number:  roomNumber,
                 machine_id:   parseInt(machineId, 10),
                 start_time:   startTime,  // SA local time — stored as-is, compared in SA tz
+                num_loads:    numLoads,   // 1, 2, or 3 — multiplies the cycle duration
             }),
         });
 
@@ -320,6 +344,8 @@ function clearForm() {
     document.getElementById("student-name").value    = "";
     document.getElementById("room-number").value     = "";
     document.getElementById("machine-select").value  = "";
+    const loadsEl = document.getElementById("num-loads");
+    if (loadsEl) loadsEl.value = "1";
     initDateTimePicker();
     updateDurationHint();
 }
@@ -341,6 +367,10 @@ document.addEventListener("DOMContentLoaded", () => {
         initDateTimePicker();
         document.getElementById("machine-select")
             .addEventListener("change", updateDurationHint);
+
+        // Also update hint when number of loads changes
+        const loadsEl = document.getElementById("num-loads");
+        if (loadsEl) loadsEl.addEventListener("change", updateDurationHint);
     }
 
 });
