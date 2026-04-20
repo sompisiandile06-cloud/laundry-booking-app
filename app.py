@@ -168,7 +168,7 @@ def get_machine_queue(machine_id: int) -> dict:
     cur  = conn.cursor()
     cur.execute(
         """
-        SELECT student_name, room_number, start_time, end_time
+        SELECT id, student_name, room_number, start_time, end_time
         FROM   bookings
         WHERE  machine_id = %s AND status = 'Active'
           AND  end_time > (NOW() AT TIME ZONE 'Africa/Johannesburg')
@@ -183,10 +183,12 @@ def get_machine_queue(machine_id: int) -> dict:
     if not rows:
         return {"status": "Available", "queue": []}
 
-    # Build the queue list — each entry has name, room, start, end
+    # Build the queue list — each entry has id, name, room, start, end
+    # The id is needed so students can cancel their specific booking
     queue = []
     for row in rows:
         queue.append({
+            "booking_id":   row["id"],
             "student_name": row["student_name"],
             "room_number":  row["room_number"],
             "start_time":   row["start_time"].isoformat(),
@@ -284,6 +286,111 @@ def home():
 def book_page():
     return render_template("book.html")
 
+
+
+@app.route("/cancel", methods=["POST"])
+def cancel_booking():
+    """
+    POST /cancel
+    Allows a student to cancel their own booking by providing their
+    name, room number, and the booking id shown in their queue slot.
+
+    After cancelling, all subsequent bookings on the same machine are
+    shifted earlier to fill the gap so no time is wasted.
+
+    Expected JSON body:
+        { "booking_id": 5, "student_name": "Thabo Nkosi", "room_number": "204" }
+    """
+    expire_old_bookings()
+    data = request.get_json()
+
+    required = ["booking_id", "student_name", "room_number"]
+    missing  = [f for f in required if not str(data.get(f, "")).strip()]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    booking_id   = int(data["booking_id"])
+    student_name = data["student_name"].strip().lower()
+    room_number  = str(data["room_number"]).strip()
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # ---- 1. Find the booking and verify it belongs to this student ----
+    cur.execute(
+        """
+        SELECT b.*, m.type AS machine_type
+        FROM   bookings b JOIN machines m ON b.machine_id = m.id
+        WHERE  b.id = %s AND b.status = 'Active'
+        """,
+        (booking_id,),
+    )
+    booking = cur.fetchone()
+
+    if booking is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Booking not found or already cancelled."}), 404
+
+    # Case-insensitive name check and exact room check for security
+    if (booking["student_name"].lower() != student_name or
+            booking["room_number"] != room_number):
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Name or room number does not match this booking. Please check and try again."}), 403
+
+    machine_id      = booking["machine_id"]
+    cancelled_start = booking["start_time"]
+    cancelled_end   = booking["end_time"]
+
+    # ---- 2. Cancel the booking ----
+    cur.execute(
+        "UPDATE bookings SET status = %s WHERE id = %s",
+        ("Cancelled", booking_id),
+    )
+
+    # ---- 3. Shift all subsequent bookings forward to fill the gap ----
+    # Fetch every active booking on this machine that starts at or after
+    # the cancelled slot start, ordered by start time.
+    cur.execute(
+        """
+        SELECT id, start_time, end_time
+        FROM   bookings
+        WHERE  machine_id = %s AND status = 'Active'
+          AND  start_time >= %s
+        ORDER  BY start_time ASC
+        """,
+        (machine_id, cancelled_start),
+    )
+    subsequent = cur.fetchall()
+
+    # Walk through each booking and close the gap left by the cancellation.
+    # Each booking keeps its own duration but starts where the previous one ended.
+    next_start = cancelled_start
+    for b in subsequent:
+        b_duration = b["end_time"] - b["start_time"]
+        new_start  = next_start
+        new_end    = new_start + b_duration
+        cur.execute(
+            "UPDATE bookings SET start_time = %s, end_time = %s WHERE id = %s",
+            (new_start, new_end, b["id"]),
+        )
+        next_start = new_end
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    shifted_count = len(subsequent)
+    return jsonify({
+        "message":       "Your booking has been cancelled successfully.",
+        "shifted_count": shifted_count,
+        "note":          (
+            f"{shifted_count} booking(s) were shifted earlier to fill the gap."
+            if shifted_count else
+            "No other bookings needed shifting."
+        ),
+    })
 
 # ---------------------------------------------------------------------------
 # Routes — Admin Pages
@@ -692,6 +799,130 @@ def admin_toggle_machine(machine_id):
     status_word = "activated" if is_active else "marked as out of service"
     return jsonify({"message": f"Machine #{machine_id} has been {status_word}."})
 
+
+
+@app.route("/admin/machines", methods=["POST"])
+@admin_required
+def admin_add_machine():
+    """
+    POST /admin/machines
+    Add a brand new machine to the laundry room.
+    Body: { "name": "Washer 4", "type": "Washer" }
+    """
+    data  = request.get_json()
+    name  = str(data.get("name", "")).strip()
+    mtype = str(data.get("type", "")).strip()
+
+    if not name:
+        return jsonify({"error": "Machine name is required."}), 400
+    if mtype not in ("Washer", "Dryer"):
+        return jsonify({"error": "Type must be Washer or Dryer."}), 400
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # Prevent duplicate names
+    cur.execute("SELECT id FROM machines WHERE LOWER(name) = LOWER(%s)", (name,))
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        return jsonify({"error": f"A machine named '{name}' already exists."}), 409
+
+    cur.execute(
+        "INSERT INTO machines (name, type, is_active) VALUES (%s, %s, TRUE) RETURNING id",
+        (name, mtype),
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "message": f"{name} ({mtype}) added successfully.",
+        "id":      new_id,
+    }), 201
+
+
+@app.route("/admin/machines/<int:machine_id>", methods=["DELETE"])
+@admin_required
+def admin_delete_machine(machine_id):
+    """
+    DELETE /admin/machines/<id>
+    Permanently remove a machine from the system.
+    Blocked if the machine has active bookings to protect students.
+    """
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    cur.execute("SELECT * FROM machines WHERE id = %s", (machine_id,))
+    machine = cur.fetchone()
+    if machine is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Machine not found."}), 404
+
+    # Check for active bookings before allowing deletion
+    cur.execute(
+        "SELECT COUNT(*) FROM bookings WHERE machine_id = %s AND status = 'Active'",
+        (machine_id,),
+    )
+    active_count = cur.fetchone()["count"]
+    if active_count > 0:
+        cur.close()
+        conn.close()
+        return jsonify({
+            "error": (
+                f"Cannot delete {machine['name']} — it has {active_count} active booking(s). "
+                f"Cancel them first or wait for them to complete."
+            )
+        }), 400
+
+    cur.execute("DELETE FROM machines WHERE id = %s", (machine_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": f"{machine['name']} has been permanently removed."})
+
+
+@app.route("/admin/bookings/clear-history", methods=["DELETE"])
+@admin_required
+def admin_clear_history():
+    """
+    DELETE /admin/bookings/clear-history
+    Permanently delete past bookings (Completed and/or Cancelled).
+    Active bookings are NEVER touched.
+    Optional ?status= param to clear only one type:
+        /admin/bookings/clear-history?status=Completed
+        /admin/bookings/clear-history?status=Cancelled
+    Without ?status= it clears both Completed and Cancelled.
+    """
+    status_filter = request.args.get("status")
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    if status_filter and status_filter in ("Completed", "Cancelled"):
+        cur.execute(
+            "DELETE FROM bookings WHERE status = %s RETURNING id",
+            (status_filter,),
+        )
+    else:
+        # Clear both completed and cancelled
+        cur.execute(
+            "DELETE FROM bookings WHERE status IN ('Completed', 'Cancelled') RETURNING id"
+        )
+
+    deleted_count = len(cur.fetchall())
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    label = status_filter if status_filter else "Completed and Cancelled"
+    return jsonify({
+        "message": f"Cleared {deleted_count} {label} booking(s) from history.",
+        "deleted": deleted_count,
+    })
 
 # ---------------------------------------------------------------------------
 # Entry point

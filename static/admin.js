@@ -99,12 +99,20 @@ async function loadAdminMachines() {
                 <div class="machine-type-badge">${typeIcon} ${machine.type}</div>
                 <h2 class="machine-name">${machine.name}</h2>
                 ${statusHtml}
-                <div class="card-footer">
+                <div class="card-footer" style="flex-direction:column; gap:8px;">
                     <button
                         class="btn-book ${isActive ? "btn-deactivate" : "btn-activate"}"
                         onclick="toggleMachine(${machine.id}, ${!isActive})"
+                        style="width:100%;"
                     >
                         ${isActive ? "Mark Out of Service" : "Bring Back Online"}
+                    </button>
+                    <button
+                        class="btn-book btn-delete-machine"
+                        onclick="deleteMachine(${machine.id}, '${machine.name}')"
+                        style="width:100%;"
+                    >
+                        Delete Machine
                     </button>
                 </div>
             `;
@@ -257,6 +265,113 @@ function showToast(message, type = "success") {
 
     // Auto-remove after 3 seconds
     setTimeout(() => toast.remove(), 3000);
+}
+
+
+// ---------------------------------------------------------------------------
+// Add Machine
+// ---------------------------------------------------------------------------
+
+async function addMachine() {
+    const nameInput = document.getElementById("new-machine-name");
+    const typeInput = document.getElementById("new-machine-type");
+    const feedback  = document.getElementById("add-machine-feedback");
+
+    const name = nameInput.value.trim();
+    const type = typeInput.value;
+
+    if (!name) {
+        feedback.textContent = "Please enter a machine name.";
+        feedback.className   = "add-machine-feedback feedback-error";
+        return;
+    }
+
+    try {
+        const resp = await fetch("/admin/machines", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ name, type }),
+        });
+        const data = await resp.json();
+
+        if (resp.ok) {
+            feedback.textContent = "✓ " + data.message;
+            feedback.className   = "add-machine-feedback feedback-success";
+            nameInput.value      = "";   // clear the name field
+            typeInput.value      = "Washer"; // reset to default
+            loadAdminMachines(); // refresh the machine grid
+            loadStats();
+        } else {
+            feedback.textContent = "✕ " + data.error;
+            feedback.className   = "add-machine-feedback feedback-error";
+        }
+    } catch (err) {
+        feedback.textContent = "Network error. Please try again.";
+        feedback.className   = "add-machine-feedback feedback-error";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Delete Machine (called from machine card)
+// ---------------------------------------------------------------------------
+
+async function deleteMachine(machineId, machineName) {
+    if (!confirm(
+        `Permanently delete ${machineName}?\n\n` +
+        `This cannot be undone. All past bookings for this machine will remain in history.`
+    )) return;
+
+    try {
+        const resp = await fetch(`/admin/machines/${machineId}`, { method: "DELETE" });
+        const data = await resp.json();
+
+        if (resp.ok) {
+            showToast(data.message, "success");
+            loadAdminMachines();
+            loadStats();
+        } else {
+            showToast(data.error, "error");
+        }
+    } catch (err) {
+        showToast("Network error. Please try again.", "error");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Clear Booking History
+// ---------------------------------------------------------------------------
+
+async function clearHistory(type) {
+    // Build a clear confirmation message depending on what is being cleared
+    const labels = {
+        "Completed": "all completed bookings",
+        "Cancelled": "all cancelled bookings",
+        "all":       "all completed AND cancelled bookings",
+    };
+    const label = labels[type] || "past bookings";
+
+    if (!confirm(
+        `Are you sure you want to permanently delete ${label}?\n\n` +
+        `Active bookings will NOT be affected. This cannot be undone.`
+    )) return;
+
+    const url = type === "all"
+        ? "/admin/bookings/clear-history"
+        : `/admin/bookings/clear-history?status=${type}`;
+
+    try {
+        const resp = await fetch(url, { method: "DELETE" });
+        const data = await resp.json();
+
+        if (resp.ok) {
+            showToast(data.message, "success");
+            loadBookings(); // refresh the table
+        } else {
+            showToast(data.error || "Failed to clear history.", "error");
+        }
+    } catch (err) {
+        showToast("Network error. Please try again.", "error");
+    }
 }
 
 // ---------------------------------------------------------------------------

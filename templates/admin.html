@@ -56,16 +56,58 @@
             </div>
         </section>
 
+        <!-- ======================================================= ADD MACHINE -->
+        <section class="admin-section">
+            <div class="section-header">
+                <h2 class="section-title">Add New Machine</h2>
+                <span class="section-hint">Add a new washer or dryer to the laundry room</span>
+            </div>
+            <div class="add-machine-form">
+                <div class="field-group">
+                    <label class="field-label" for="new-machine-name">Machine Name</label>
+                    <input
+                        type="text"
+                        id="new-machine-name"
+                        class="field-input"
+                        placeholder="e.g. Washer 4"
+                        style="max-width:280px;"
+                    />
+                </div>
+                <div class="field-group">
+                    <label class="field-label" for="new-machine-type">Machine Type</label>
+                    <select id="new-machine-type" class="field-input field-select" style="max-width:200px;">
+                        <option value="Washer">🫧 Washer — 45 minutes</option>
+                        <option value="Dryer">💨 Dryer — 60 minutes</option>
+                    </select>
+                </div>
+                <button class="submit-btn add-machine-btn" onclick="addMachine()">
+                    Add Machine
+                </button>
+                <p id="add-machine-feedback" class="add-machine-feedback"></p>
+            </div>
+        </section>
+
         <!-- ======================================================= BOOKINGS -->
         <section class="admin-section">
             <div class="section-header">
                 <h2 class="section-title">Bookings</h2>
                 <!-- Filter tabs -->
                 <div class="booking-filter-tabs">
-                    <button class="filter-btn active" data-status="all"    onclick="filterBookings('all')">All</button>
-                    <button class="filter-btn"         data-status="Active"     onclick="filterBookings('Active')">Active</button>
-                    <button class="filter-btn"         data-status="Completed"  onclick="filterBookings('Completed')">Completed</button>
-                    <button class="filter-btn"         data-status="Cancelled"  onclick="filterBookings('Cancelled')">Cancelled</button>
+                    <button class="filter-btn active" data-status="all"       onclick="filterBookings('all')">All</button>
+                    <button class="filter-btn"        data-status="Active"    onclick="filterBookings('Active')">Active</button>
+                    <button class="filter-btn"        data-status="Completed" onclick="filterBookings('Completed')">Completed</button>
+                    <button class="filter-btn"        data-status="Cancelled" onclick="filterBookings('Cancelled')">Cancelled</button>
+                </div>
+                <div class="clear-history-btns">
+                    <button class="btn-clear-history" onclick="clearHistory('Completed')">
+                        Clear Completed
+                    </button>
+                    <button class="btn-clear-history" onclick="clearHistory('Cancelled')">
+                        Clear Cancelled
+                    </button>
+                    <button class="btn-clear-history btn-clear-all" onclick="clearHistory('all')">
+                        Clear All History
+                    </button>
                 </div>
             </div>
 
@@ -99,7 +141,7 @@
     </main>
 
     <footer class="site-footer">
-        <p>© 2026 SophiatownResidenceLaundry · Admin Dashboard · Data refreshes every 30 seconds</p>
+        <p>© 2025 ResidenceLaundry · Admin Dashboard · Data refreshes every 30 seconds</p>
     </footer>
 
     <script src="/static/admin.js"></script>
