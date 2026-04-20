@@ -964,3 +964,116 @@ nav {
     font-size: 12px;
     color: var(--text-muted);
 }
+
+/* ================================================================
+   CANCEL BUTTON inside queue entries
+   ================================================================ */
+.btn-cancel-slot {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--busy);
+    border: 1px solid #f5c6c6;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.btn-cancel-slot:hover {
+    background: var(--busy);
+    color: #fff;
+    border-color: var(--busy);
+}
+
+/* ================================================================
+   CANCEL MODAL
+   ================================================================ */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(26, 23, 20, 0.55);
+    backdrop-filter: blur(3px);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 460px;
+    box-shadow: var(--shadow-lg);
+    animation: fadeUp 200ms ease;
+}
+
+.modal-title {
+    font-family: var(--font-serif);
+    font-size: 26px;
+    margin-bottom: 12px;
+}
+
+.modal-sub {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.modal-btn-secondary {
+    flex: 1;
+    padding: 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.modal-btn-secondary:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+.modal-btn-danger {
+    flex: 1;
+    padding: 11px;
+    background: var(--busy);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.modal-btn-danger:hover    { background: #8b1f1f; }
+.modal-btn-danger:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+
+/* Feedback message inside modal */
+.cancel-feedback {
+    font-size: 13px;
+    margin-top: 14px;
+    min-height: 20px;
+    line-height: 1.5;
+}
+
+.cancel-success { color: var(--available); font-weight: 500; }
+.cancel-error   { color: var(--busy);      font-weight: 500; }
