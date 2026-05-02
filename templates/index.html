@@ -13,8 +13,8 @@
     <header class="site-header">
         <div class="header-inner">
             <div class="brand">
-                <span class="brand-icon">⬡</span>
-                <span class="brand-name">SophiaTown Residence Laundry Booking</span>
+                <img src="/static/logo.png" alt="SophiaTown Logo" class="brand-logo" />
+                <span class="brand-name">ResidenceLaundry</span>
             </div>
             <nav>
                 <a href="/" class="nav-link active">Machines</a>
@@ -57,8 +57,41 @@
     </main>
 
     <footer class="site-footer">
-        <p>© 2026 SophiaTownResidenceLaundry · Data refreshes every 30 seconds</p>
+        <p>© 2025 ResidenceLaundry · Data refreshes every 30 seconds</p>
     </footer>
+
+    <!-- ======================================================= CANCEL MODAL -->
+    <div id="cancel-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card">
+            <h2 class="modal-title">Cancel Booking</h2>
+            <p class="modal-sub">
+                You are cancelling your slot on <strong id="cancel-machine-name"></strong>.
+                The next person in the queue will be shifted up automatically.
+            </p>
+            <p class="modal-sub" style="margin-top:8px;">
+                Enter your details to confirm it is your booking:
+            </p>
+
+            <div class="field-group" style="margin-top:16px;">
+                <label class="field-label" for="cancel-name-input">Your Full Name</label>
+                <input type="text" id="cancel-name-input" class="field-input" placeholder="e.g. Thabo Nkosi" />
+            </div>
+
+            <div class="field-group" style="margin-top:12px;">
+                <label class="field-label" for="cancel-room-input">Your Room Number</label>
+                <input type="text" id="cancel-room-input" class="field-input" placeholder="e.g. 204" />
+            </div>
+
+            <p id="cancel-feedback" class="cancel-feedback"></p>
+
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="closeCancelModal()">Keep Booking</button>
+                <button class="modal-btn-danger" id="cancel-confirm-btn" onclick="confirmCancel()">
+                    Yes, Cancel Booking
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/script.js"></script>
 </body>

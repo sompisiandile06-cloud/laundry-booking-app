@@ -86,10 +86,11 @@ input, select { font-family: inherit; }
     letter-spacing: -0.3px;
 }
 
-.brand-icon {
-    font-size: 22px;
-    color: var(--accent);
-    line-height: 1;
+.brand-logo {
+    height: 38px;
+    width: 38px;
+    object-fit: contain;
+    border-radius: 4px;
 }
 
 nav {
