@@ -98,19 +98,26 @@ function renderMachineCards(machines, filterType) {
                 <p class="machine-detail">Cycle: <strong>${machine.duration_minutes} min</strong></p>`;
         } else if (isBusy) {
             // Build the full queue list showing every booking in order
+            // Each entry includes a Cancel button so students can remove their slot
             const queueHtml = machine.queue && machine.queue.length > 0
                 ? machine.queue.map((entry, i) => {
-                    const label = i === 0 ? "NOW " : `${i + 1}.  `;
-                    const tag   = i === 0
+                    const tag = i === 0
                         ? `<span class="queue-tag queue-now">NOW</span>`
                         : `<span class="queue-tag queue-next">#${i + 1}</span>`;
+                    const cancelBtn = `
+                        <button
+                            class="btn-cancel-slot"
+                            onclick="openCancelModal(${entry.booking_id}, '${entry.student_name}', '${entry.room_number}', '${machine.name}')"
+                            title="Cancel this booking"
+                        >Cancel</button>`;
                     return `
                         <div class="queue-entry ${i === 0 ? 'queue-current' : ''}">
                             ${tag}
                             <div class="queue-info">
-                                <span class="queue-name">${entry.student_name} · Room ${entry.room_number}</span>
+                                <span class="queue-name">${entry.student_name}</span>
                                 <span class="queue-time">${formatTime(entry.start_time)} – ${formatTime(entry.end_time)}</span>
                             </div>
+                            ${cancelBtn}
                         </div>`;
                 }).join("")
                 : "";
@@ -349,6 +356,93 @@ function clearForm() {
     initDateTimePicker();
     updateDurationHint();
 }
+
+// ---------------------------------------------------------------------------
+// CANCEL BOOKING — Modal + API call
+// ---------------------------------------------------------------------------
+
+// Store details of the booking being cancelled so the modal can use them
+let cancelTarget = { bookingId: null, studentName: "", roomNumber: "", machineName: "" };
+
+/**
+ * Open the cancel confirmation modal.
+ * Pre-fills the machine name so the student knows what they are cancelling.
+ */
+function openCancelModal(bookingId, studentName, roomNumber, machineName) {
+    cancelTarget = { bookingId, studentName, roomNumber, machineName };
+
+    document.getElementById("cancel-machine-name").textContent = machineName;
+    document.getElementById("cancel-name-input").value         = "";
+    document.getElementById("cancel-room-input").value         = "";
+    document.getElementById("cancel-feedback").textContent     = "";
+    document.getElementById("cancel-feedback").className       = "cancel-feedback";
+
+    show(document.getElementById("cancel-modal-overlay"));
+}
+
+/** Close the cancel modal without doing anything. */
+function closeCancelModal() {
+    hide(document.getElementById("cancel-modal-overlay"));
+}
+
+/**
+ * Submit the cancellation — verifies name + room match on the server,
+ * then shifts the queue if successful.
+ */
+async function confirmCancel() {
+    const nameInput = document.getElementById("cancel-name-input").value.trim();
+    const roomInput = document.getElementById("cancel-room-input").value.trim();
+    const feedback  = document.getElementById("cancel-feedback");
+    const confirmBtn = document.getElementById("cancel-confirm-btn");
+
+    if (!nameInput || !roomInput) {
+        feedback.textContent = "Please enter your name and room number to confirm.";
+        feedback.className   = "cancel-feedback cancel-error";
+        return;
+    }
+
+    confirmBtn.disabled    = true;
+    confirmBtn.textContent = "Cancelling…";
+
+    try {
+        const response = await fetch("/cancel", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({
+                booking_id:   cancelTarget.bookingId,
+                student_name: nameInput,
+                room_number:  roomInput,
+            }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            feedback.textContent = `✓ ${data.message} ${data.note}`;
+            feedback.className   = "cancel-feedback cancel-success";
+            // Refresh the machine grid after a short delay so the user sees the message
+            setTimeout(() => {
+                closeCancelModal();
+                loadMachines();
+            }, 2000);
+        } else {
+            feedback.textContent = `✕ ${data.error}`;
+            feedback.className   = "cancel-feedback cancel-error";
+        }
+    } catch (err) {
+        feedback.textContent = "Network error. Please try again.";
+        feedback.className   = "cancel-feedback cancel-error";
+    } finally {
+        confirmBtn.disabled    = false;
+        confirmBtn.textContent = "Yes, Cancel Booking";
+    }
+}
+
+// Close modal if user clicks outside it
+document.addEventListener("click", (e) => {
+    const overlay = document.getElementById("cancel-modal-overlay");
+    if (overlay && e.target === overlay) closeCancelModal();
+});
 
 // ---------------------------------------------------------------------------
 // Init
