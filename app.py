@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
+import bcrypt
 import psycopg2
 import psycopg2.extras
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
@@ -68,7 +69,7 @@ def init_db():
         )
     """)
 
-    # bookings — unchanged from v2
+    # bookings table — pin_hash stores bcrypt hash of the student's 4-digit PIN
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             id           SERIAL    PRIMARY KEY,
@@ -78,8 +79,14 @@ def init_db():
             start_time   TIMESTAMP NOT NULL,
             end_time     TIMESTAMP NOT NULL,
             status       TEXT      NOT NULL DEFAULT 'Active'
-                             CHECK(status IN ('Active', 'Completed', 'Cancelled'))
+                             CHECK(status IN ('Active', 'Completed', 'Cancelled')),
+            pin_hash     TEXT      NOT NULL DEFAULT ''
         )
+    """)
+
+    # Add pin_hash column if upgrading from an older version of the schema
+    cur.execute("""
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pin_hash TEXT NOT NULL DEFAULT ''
     """)
 
     # Add is_active column if upgrading from an older version of the schema
@@ -511,7 +518,7 @@ def create_booking():
     expire_old_bookings()
     data = request.get_json()
 
-    required = ["student_name", "room_number", "machine_id", "start_time"]
+    required = ["student_name", "room_number", "machine_id", "start_time", "pin"]
     missing  = [f for f in required if not data.get(f)]
     if missing:
         return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
@@ -519,6 +526,14 @@ def create_booking():
     student_name = data["student_name"].strip()
     room_number  = str(data["room_number"]).strip()
     machine_id   = data["machine_id"]
+
+    # Validate PIN — must be exactly 4 digits
+    pin = str(data["pin"]).strip()
+    if not pin.isdigit() or len(pin) != 4:
+        return jsonify({"error": "PIN must be exactly 4 digits (e.g. 1234)."}), 400
+
+    # Hash the PIN using bcrypt — we never store the plain PIN
+    pin_hash = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     try:
         # Save the student's local time (SA time) directly.
@@ -564,10 +579,10 @@ def create_booking():
     cur  = conn.cursor()
     cur.execute(
         """
-        INSERT INTO bookings (student_name, room_number, machine_id, start_time, end_time, status)
-        VALUES (%s, %s, %s, %s, %s, 'Active') RETURNING id
+        INSERT INTO bookings (student_name, room_number, machine_id, start_time, end_time, status, pin_hash)
+        VALUES (%s, %s, %s, %s, %s, 'Active', %s) RETURNING id
         """,
-        (student_name, room_number, machine_id, start_time, end_time),
+        (student_name, room_number, machine_id, start_time, end_time, pin_hash),
     )
     booking_id = cur.fetchone()["id"]
     conn.commit()
@@ -580,8 +595,135 @@ def create_booking():
         "machine":    machine["name"],
         "start_time": start_time.isoformat(),
         "end_time":   end_time.isoformat(),
+        "note":       "Keep your 4-digit PIN safe — you will need it to cancel this booking.",
     }), 201
 
+
+
+@app.route("/cancel", methods=["POST"])
+def cancel_booking():
+    """
+    POST /cancel
+    Allows a student to cancel their own booking by verifying:
+      - Full name (case-insensitive)
+      - Room number (exact match)
+      - 4-digit PIN (checked against bcrypt hash)
+
+    On success, all subsequent bookings on the same machine are
+    shifted earlier to fill the gap so no time is wasted.
+
+    Expected JSON body:
+        {
+            "booking_id":   5,
+            "student_name": "Thabo Nkosi",
+            "room_number":  "204",
+            "pin":          "7391"
+        }
+    """
+    expire_old_bookings()
+    data = request.get_json()
+
+    required = ["booking_id", "student_name", "room_number", "pin"]
+    missing  = [f for f in required if not str(data.get(f, "")).strip()]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    booking_id   = int(data["booking_id"])
+    student_name = data["student_name"].strip().lower()
+    room_number  = str(data["room_number"]).strip()
+    pin          = str(data["pin"]).strip()
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # ---- 1. Find the booking ----
+    cur.execute(
+        """
+        SELECT b.*, m.type AS machine_type
+        FROM   bookings b JOIN machines m ON b.machine_id = m.id
+        WHERE  b.id = %s AND b.status = 'Active'
+        """,
+        (booking_id,),
+    )
+    booking = cur.fetchone()
+
+    if booking is None:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Booking not found or already cancelled."}), 404
+
+    # ---- 2. Verify name matches (case-insensitive) ----
+    if booking["student_name"].lower() != student_name:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Name does not match this booking. Please check and try again."}), 403
+
+    # ---- 3. Verify room number matches ----
+    if booking["room_number"] != room_number:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Room number does not match this booking. Please check and try again."}), 403
+
+    # ---- 4. Verify PIN using bcrypt ----
+    stored_hash = booking["pin_hash"]
+    if not stored_hash:
+        # Old booking created before PIN feature — cannot verify
+        cur.close()
+        conn.close()
+        return jsonify({"error": "This booking has no PIN set. Please ask the admin to cancel it."}), 400
+
+    pin_correct = bcrypt.checkpw(pin.encode("utf-8"), stored_hash.encode("utf-8"))
+    if not pin_correct:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Incorrect PIN. Please try again."}), 403
+
+    # ---- 5. All checks passed — cancel the booking ----
+    machine_id      = booking["machine_id"]
+    cancelled_start = booking["start_time"]
+
+    cur.execute(
+        "UPDATE bookings SET status = 'Cancelled' WHERE id = %s",
+        (booking_id,),
+    )
+
+    # ---- 6. Shift subsequent bookings forward to close the gap ----
+    cur.execute(
+        """
+        SELECT id, start_time, end_time
+        FROM   bookings
+        WHERE  machine_id = %s AND status = 'Active'
+          AND  start_time >= %s
+        ORDER  BY start_time ASC
+        """,
+        (machine_id, cancelled_start),
+    )
+    subsequent = cur.fetchall()
+
+    next_start = cancelled_start
+    for b in subsequent:
+        b_duration = b["end_time"] - b["start_time"]
+        new_start  = next_start
+        new_end    = new_start + b_duration
+        cur.execute(
+            "UPDATE bookings SET start_time = %s, end_time = %s WHERE id = %s",
+            (new_start, new_end, b["id"]),
+        )
+        next_start = new_end
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    shifted_count = len(subsequent)
+    return jsonify({
+        "message": "Your booking has been cancelled successfully.",
+        "note":    (
+            f"{shifted_count} booking(s) were shifted earlier to fill the gap."
+            if shifted_count else
+            "No other bookings needed shifting."
+        ),
+    })
 
 # ---------------------------------------------------------------------------
 # Routes — Admin REST API (all protected by @admin_required)

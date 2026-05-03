@@ -270,6 +270,7 @@ async function submitBooking() {
     const machineId   = document.getElementById("machine-select").value;
     const startTime   = document.getElementById("start-time").value;
     const numLoads    = parseInt(document.getElementById("num-loads")?.value || "1", 10);
+    const pin         = document.getElementById("booking-pin")?.value.trim() || "";
 
     const successMsg = document.getElementById("success-msg");
     const errorMsg   = document.getElementById("error-msg");
@@ -279,6 +280,12 @@ async function submitBooking() {
 
     if (!studentName || !roomNumber || !machineId || !startTime) {
         showBookingError("Please fill in all fields before submitting.");
+        return;
+    }
+
+    // Validate PIN — must be exactly 4 digits
+    if (document.getElementById("booking-pin") && (!/^\d{4}$/.test(pin))) {
+        showBookingError("PIN must be exactly 4 digits (e.g. 1234).");
         return;
     }
 
@@ -298,6 +305,7 @@ async function submitBooking() {
                 machine_id:   parseInt(machineId, 10),
                 start_time:   startTime,  // SA local time — stored as-is, compared in SA tz
                 num_loads:    numLoads,   // 1, 2, or 3 — multiplies the cycle duration
+                pin:          pin,        // 4-digit PIN — hashed on the server with bcrypt
             }),
         });
 
@@ -353,6 +361,8 @@ function clearForm() {
     document.getElementById("machine-select").value  = "";
     const loadsEl = document.getElementById("num-loads");
     if (loadsEl) loadsEl.value = "1";
+    const pinEl = document.getElementById("booking-pin");
+    if (pinEl) pinEl.value = "";
     initDateTimePicker();
     updateDurationHint();
 }
@@ -374,6 +384,7 @@ function openCancelModal(bookingId, studentName, roomNumber, machineName) {
     document.getElementById("cancel-machine-name").textContent = machineName;
     document.getElementById("cancel-name-input").value         = "";
     document.getElementById("cancel-room-input").value         = "";
+    document.getElementById("cancel-pin-input").value          = "";
     document.getElementById("cancel-feedback").textContent     = "";
     document.getElementById("cancel-feedback").className       = "cancel-feedback";
 
@@ -392,11 +403,18 @@ function closeCancelModal() {
 async function confirmCancel() {
     const nameInput = document.getElementById("cancel-name-input").value.trim();
     const roomInput = document.getElementById("cancel-room-input").value.trim();
+    const pinInput  = document.getElementById("cancel-pin-input").value.trim();
     const feedback  = document.getElementById("cancel-feedback");
     const confirmBtn = document.getElementById("cancel-confirm-btn");
 
-    if (!nameInput || !roomInput) {
-        feedback.textContent = "Please enter your name and room number to confirm.";
+    if (!nameInput || !roomInput || !pinInput) {
+        feedback.textContent = "Please fill in your name, room number, and PIN.";
+        feedback.className   = "cancel-feedback cancel-error";
+        return;
+    }
+
+    if (!/^\d{4}$/.test(pinInput)) {
+        feedback.textContent = "PIN must be exactly 4 digits.";
         feedback.className   = "cancel-feedback cancel-error";
         return;
     }
@@ -412,6 +430,7 @@ async function confirmCancel() {
                 booking_id:   cancelTarget.bookingId,
                 student_name: nameInput,
                 room_number:  roomInput,
+                pin:          pinInput,
             }),
         });
 
